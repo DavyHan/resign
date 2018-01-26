@@ -7,6 +7,7 @@ import time
 import shutil
 import subprocess
 import plistlib
+import sys,getopt
 
 signextensions      = ['.framework/','.dylib','.appex/','.app/']
 bundleidentifierkey = 'CFBundleIdentifier'
@@ -14,6 +15,15 @@ replaceplistkey     = 'BundleIdentifier'
 oldbundleId         = None 
 uncheckedfiles      = [] #暂未检查bundleId文件列表
 certificatelist     = [] #证书列表
+version             = 'v1.0.0'
+
+#用户参数
+zipFilePath         = None
+outputPath          = None
+certificate         = None
+mobileprovision     = None
+entilement          = None
+newBundleIdentifier = None
 
 #拷贝mobileprovsion到xxx.app目录
 def copyprovsion2appdir(originpath,mobileprovision):
@@ -121,12 +131,8 @@ def verifySignature(extralfilepath):
 				return False
 	return False
 
-def main():
-	zipFilePath = input('请拖拽ipa到此：').strip()
-
-	homedir = os.environ['HOME']
-	extrapath = '%s/Payload_temp_%s/' % (homedir,str(time.time()))
-
+#准备签名证书
+def prepareCertificate():
 	#获取证书列表
 	if not getCertificates():
 		return False
@@ -139,17 +145,90 @@ def main():
 			return False
 		else:
 			selcert = certificatelist[certificateindex-1]
+			global certificate
 			certificate = selcert[selcert.find('"')+1:selcert.rfind('"')]
 			print("你选择的签名证书是："+certificate)
 	except Exception as e:
 		print('签名证书选择有误,请重试')
 		return False
 
-	mobileprovision = input('请拖拽mobileprovsion到此：').strip()
-	newBundleIdentifier = input('请输入新的BundleId(请与mobileprovision匹配，不输入则不修改BundleId)：').strip()
-	entilement  = extrapath + "entitlements.plist"
+#准备参数
+def prepareArgsOptions():
+	showhelp,showversion = False, False
+	try:
+		opts, args = getopt.getopt(sys.argv[1:],'hvi:o:c:p:e:b:')
+	except Exception as e:
+		print('参数不正确，请仔细检查！\n使用"resign -h"命令来查看帮助')
+		sys.exit(0)
+	for op, value in opts:
+		if op == '-i':
+			global zipFilePath
+			zipFilePath = value
+		elif op == '-o':
+			global outputPath
+			outputPath = value
+		elif op == '-c':
+			global certificate
+			certificate = value
+		elif op == '-p':
+			global mobileprovision
+			mobileprovision = value
+		elif op == '-e':
+			global entilement
+			entilement = value
+		elif op == '-b':
+			global newBundleIdentifier
+			newBundleIdentifier = value
+		elif op == '-h':
+			showhelp = True
+		elif op == '-v':
+			showversion = True
+	if len(sys.argv) == 1 or showhelp:
+		print('''
+Usage: resign -i <input.ipa> -c "<certificate-name>" -p <provision-file-path>
 
-	destinationzfile = zipFilePath[:zipFilePath.rfind('.')] + '_resigned.ipa'
+where options are:
+  -o <output-file-path>       resigned file output path
+  -e <entitlements-file-path> entitlements.plist path
+  -b <new-bundle-identifier>  new bundle id match with mobileprovsion
+  -h                          show help information
+  -v                          show resign tool version
+			''')
+		sys.exit(0)
+	elif showversion:
+		print(version)
+		sys.exit(0)
+	else:
+		if zipFilePath == None:
+			zipFilePath = input('请拖拽ipa到此：').strip()
+		if certificate == None:
+			prepareCertificate()
+		if mobileprovision == None:
+			mobileprovision = input('请拖拽mobileprovsion到此：').strip()
+		if not os.path.isfile(zipFilePath):
+			print('待签名ipa路径不正确，请仔细检查！')
+			sys.exit(0)
+		if not os.path.isfile(mobileprovision):
+			print('mobileprovsion路径不正确，请仔细检查！')
+			sys.exit(0)
+
+def main():
+
+	homedir = os.environ['HOME']
+	extrapath = '%s/Payload_temp_%s/' % (homedir,str(time.time()))
+
+	#准备参数
+	prepareArgsOptions()
+
+	global outputPath
+	if outputPath == None:
+		outputPath = zipFilePath[:zipFilePath.rfind('.')] + '_resigned.ipa'
+	elif not '.ipa' in outputPath:
+		if not os.path.exists(outputPath):
+			print('输出文件路径有误，请仔细检查！')
+			sys.exit(0)
+			return
+		outputPath = os.path.join(outputPath,zipFilePath[zipFilePath.rfind(os.sep)+1:zipFilePath.rfind('.')]+'_resigned.ipa')
 
 	originzfile = zipfile.ZipFile(zipFilePath,'r')
 	zfilelist = originzfile.namelist()
@@ -159,20 +238,23 @@ def main():
 	originzfile.extractall(extrapath)
 
 	#修改BundleIdentifier
-	if newBundleIdentifier != '':
+	if newBundleIdentifier != None:
 		modifyBundleIdentifer(extrapath,newBundleIdentifier)
 
 	#拷贝mobileprovsion
 	copyprovsion2appdir(extrapath, mobileprovision)
 
-	#生成entitlement.plist文件
-	if not generateentitlements(mobileprovision,entilement):
-		print("生成entitlements.plist文件失败!")
-		#关闭zipfile
-		originzfile.close()
-		#删除临时解压目录
-		shutil.rmtree(extrapath)
-		return False
+	global entilement
+	if entilement == None:
+		entilement = extrapath + "entitlements.plist"
+		#生成entitlement.plist文件
+		if not generateentitlements(mobileprovision,entilement):
+			print("生成entitlements.plist文件失败!")
+			#关闭zipfile
+			originzfile.close()
+			#删除临时解压目录
+			shutil.rmtree(extrapath)
+			return False
 		
 	try:
 		#开始签名
@@ -180,8 +262,8 @@ def main():
 			print("-------------签名完成，开始验证签名-------------")
 			if verifySignature(extrapath):
 				print("-------------验签成功，开始打包-------------")
-				zipcompress(extrapath,destinationzfile)
-				print("🚀 重签名打包成功,请查看：%s" % destinationzfile)
+				zipcompress(extrapath,outputPath)
+				print("🚀 重签名打包成功,请查看：%s" % outputPath)
 			else:
 				print("-----------------验签失败，请重试---------------")
 		else:
