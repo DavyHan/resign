@@ -15,6 +15,7 @@ replaceplistkey     = 'BundleIdentifier'
 oldbundleId         = None 
 uncheckedfiles      = [] #暂未检查bundleId文件列表
 certificatelist     = [] #证书列表
+executableName      = None
 version             = 'v1.0.0'
 
 #用户参数
@@ -83,17 +84,23 @@ def getCertificates():
 		print(e)
 		return False
 
+#获取可执行文件名
+def getExecutableName(originpath):
+	for dirpath, dirnames, filenames in os.walk(originpath):
+		if dirpath[dirpath.rfind('.'):] == '.app':
+			return dirpath[dirpath.rfind(os.sep)+1:dirpath.rfind('.')]
+
 #文件是否需要签名
 def isneedsign(filename):
 	for signextension in signextensions:
-		if signextension == filename[filename.rfind('.'):]:
+		if signextension == filename[filename.rfind('.'):] or executableName == filename[filename.rfind(os.sep)+1:]:
 			return True
 	return False
 
 #签名
 def codesign(certificate,entilement,signObj,extrapath):
-	(status, output) = subprocess.getstatusoutput('codesign -f -s "%s" --entitlements "%s" "%s"' % (certificate,entilement,'%s/%s' % (extrapath,signObj)))
-	if status == 0 and 'replacing existing signature' in output:
+	(status, output) = subprocess.getstatusoutput('codesign -f -s "%s" --entitlements "%s" "%s"' % (certificate,entilement,os.path.join(extrapath,signObj)))
+	if status == 0:
 		print('replacing %s existing signature successed' % signObj)
 		return True
 	else:
@@ -107,6 +114,8 @@ def startsign(certificate,entilement,zfilelist,extrapath):
 		if isneedsign(filename):
 			if not codesign(certificate,entilement,filename,extrapath):
 	 			return False
+	if not codesign(certificate,entilement,os.path.join('Payload',executableName+'.app'),extrapath):
+		return False
 	return True
 
 #zip压缩
@@ -255,7 +264,18 @@ def main():
 			#删除临时解压目录
 			shutil.rmtree(extrapath)
 			return False
-		
+	
+	#获取可执行文件名
+	global executableName
+	executableName = getExecutableName(extrapath)
+	if executableName == None or executableName == '':
+		print("获取可执行文件名失败!")
+		#关闭zipfile
+		originzfile.close()
+		#删除临时解压目录
+		shutil.rmtree(extrapath)
+		return False
+
 	try:
 		#开始签名
 		if zfilelist != None and startsign(certificate,entilement,zfilelist,extrapath):

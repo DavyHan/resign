@@ -42,6 +42,10 @@ brew tap kevll/resign && brew install resign
 
 3.clone仓库或者下载resign.py，使用python3运行
 
+## 如何同时注入dylib到ipa
+1.先使用[inject_dylib](https://github.com/kevll/inject_dylib)注入dylib到ipa
+2.再使用resign进行签名打包
+
 ## Hope
 
 如果觉得有用，欢迎star</br>
